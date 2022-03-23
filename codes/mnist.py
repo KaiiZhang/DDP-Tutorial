@@ -2,7 +2,7 @@
 Author: Kai Zhang
 Date: 2022-03-19 15:12:04
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-19 16:06:18
+LastEditTime: 2022-03-23 19:24:13
 Description: demo of mnist classification 
 '''
 from datetime import datetime
@@ -78,12 +78,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-g', '--gpuid', default=0, type=int,
                         help="which gpu to use")
-    parser.add_argument('-e', '--epochs', default=1, type=int, 
+    parser.add_argument('-e', '--epochs', default=1, type=int,
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int, 
+    parser.add_argument('-b', '--batchsize', default=4, type=int,
                         metavar='N',
-                        help='number of batchsize')         
+                        help='number of batchsize')
 
     args = parser.parse_args()
     train(args.gpuid, args)

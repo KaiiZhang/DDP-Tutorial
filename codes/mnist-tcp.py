@@ -2,8 +2,8 @@
 Author: Kai Zhang
 Date: 2022-03-19 16:05:57
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-20 21:36:53
-Description: file content
+LastEditTime: 2022-03-23 19:23:55
+Description: Start DDP in tcp model
 '''
 from datetime import datetime
 import argparse
@@ -20,12 +20,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-g', '--gpuid', default=0, type=int,
                         help="which gpu to use")
-    parser.add_argument('-e', '--epochs', default=1, type=int, 
+    parser.add_argument('-e', '--epochs', default=1, type=int,
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int, 
+    parser.add_argument('-b', '--batchsize', default=4, type=int,
                         metavar='N',
-                        help='number of batchsize')   
+                        help='number of batchsize')
     ##################################################################################
     parser.add_argument('--init_method', default='tcp://localhost:18888',            #
                         help="init-method")                                          #
@@ -35,7 +35,7 @@ def main():
                         help="world size")                                           #
     parser.add_argument('--use_mix_precision', default=False, type=bool,             #
                         action='store_true', help="whether to use mix precision")    #
-    ##################################################################################                  
+    ##################################################################################
     args = parser.parse_args()
     train(args.gpuid, args)
 
@@ -84,7 +84,7 @@ def train(gpu, args):
     ######################################################################################################################
     model = ConvNet()
     model.cuda(gpu)
-    batch_size = 10 
+    batch_size = 10
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().to(gpu)
     optimizer = torch.optim.SGD(model.parameters(), 1e-4)
@@ -137,7 +137,7 @@ def train(gpu, args):
             with torch.cuda.amp.autocast(enabled=args.use_mix_precision):    #
                 outputs = model(images)                                      #
                 loss = criterion(outputs, labels)                            #
-            ##################################################################  
+            ##################################################################
             # Backward and optimize
             optimizer.zero_grad()
             ##############    N6    ##########
@@ -146,12 +146,12 @@ def train(gpu, args):
             optimizer.step()
             ################    N7    ####################
             if (i + 1) % 100 == 0 and args.rank == 0:    #
-            ##############################################   
+            ##############################################
                 print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch + 1, args.epochs, i + 1, total_step,
                                                                    loss.item()))
-        evaluate(model, gpu, test_loader, args.rank)        
-    dist.destroy_process_group()       
-    ######    N8    #######                                       
+        evaluate(model, gpu, test_loader, args.rank)
+    dist.destroy_process_group()
+    ######    N8    #######
     if args.rank == 0:    #
     #######################
         print("Training complete in: " + str(datetime.now() - start))

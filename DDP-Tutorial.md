@@ -2,7 +2,7 @@
  * @Author: Kai Zhang
  * @Date: 2022-03-20 15:01:01
  * @LastEditors: Kai Zhang
- * @LastEditTime: 2022-03-23 19:16:13
+ * @LastEditTime: 2022-03-23 21:14:38
  * @Description: Tutorial for DDP
 -->
 # 上手Distributed Data Parallel的详尽教程
@@ -67,7 +67,7 @@ model = nn.DataParallel(model)
 |:--:|
 | *DDP的流程图，其中Construction只在训练开始前执行一次，仅Forward和Backward在训练中重复多次* |
 
-DDP的流程示意图如上图所示，DDP需要额外的建立进程组阶段（Construction）。在Construction阶段需要首先明确通信协议和总进程数。通信协议是实现DDP的底层基础，我们在之后单独介绍。总进程数就是指有多少个独立的并行进程，被称为wordsize。根据需求每个进程可以占用一个或多个GPU，但并不推荐多个进程共享一个GPU，这会造成潜在的性能损失。为了便于理解，在本文的所有示例中我们假定每个进程只占用1个GPU，占用多个GPU的情况只需要简单的调整GPU映射关系就好。
+DDP的流程示意图如上图所示，DDP需要额外的建立进程组阶段（Construction）。在Construction阶段需要首先明确通信协议和总进程数。通信协议是实现DDP的底层基础，我们在之后单独介绍。总进程数就是指有多少个独立的并行进程，被称为worldsize。根据需求每个进程可以占用一个或多个GPU，但并不推荐多个进程共享一个GPU，这会造成潜在的性能损失。为了便于理解，在本文的所有示例中我们假定每个进程只占用1个GPU，占用多个GPU的情况只需要简单的调整GPU映射关系就好。
 
 并行组建立之后，每个GPU上会独立的构建模型，然后GPU-1中模型的状态会被广播到其它所有进程中以保证所有模型都具有相同的初始状态。值得注意的是Construction只在训练开始前执行，在训练中只会不断迭代前向和后向过程，因此不会带来额外的延迟。
 
@@ -165,7 +165,7 @@ def main():
     parser.add_argument('-e', '--epochs', default=2, type=int, 
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int, 
+    parser.add_argument('-b', '--batch_size', default=4, type=int, 
                         metavar='N',
                         help='number of batchsize')         
 
@@ -252,7 +252,7 @@ def main():
     parser.add_argument('-e', '--epochs', default=1, type=int, 
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int, 
+    parser.add_argument('-b', '--batch_size', default=4, type=int, 
                         metavar='N',
                         help='number of batchsize')   
     ##################################################################################
@@ -262,7 +262,7 @@ def main():
                     help='rank of current process')                                  #
     parser.add_argument('--world_size', default=2, type=int,                         #
                         help="world size")                                           #
-    parser.add_argument('--use_mix_precision', default=False, type=bool,             #
+    parser.add_argument('--use_mix_precision', default=False,                        #
                         action='store_true', help="whether to use mix precision")    #
     ##################################################################################                  
     args = parser.parse_args()
@@ -283,7 +283,6 @@ def train(gpu, args):
     ######################################################################################################################
     model = ConvNet()
     model.cuda(gpu)
-    batch_size = 10 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().to(gpu)
     optimizer = torch.optim.SGD(model.parameters(), 1e-4)
@@ -301,7 +300,7 @@ def train(gpu, args):
     ####################################    N3    #######################################
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)      #
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,                   #
-                                               batch_size=batch_size,                   #
+                                               batch_size=args.batch_size,              #
                                                shuffle=False,                           #
                                                num_workers=0,                           #
                                                pin_memory=True,                         #
@@ -327,8 +326,9 @@ def train(gpu, args):
             optimizer.zero_grad()
             ##############    N6    ##########
             scaler.scale(loss).backward()    #
+            scaler.step(optimizer)           #
+            scaler.update()                  #
             ##################################
-            optimizer.step()
             ################    N7    ####################
             if (i + 1) % 100 == 0 and args.rank == 0:    #
             ##############################################   
@@ -348,7 +348,7 @@ def train(gpu, args):
 * N3：DDP要求定义`distributed.DistributedSampler`，通过封装`train_dataset`实现；在建立`DataLoader`时指定`sampler`。此外还要注意：`shuffle=False`。DDP的数据打乱需要通过设置`sampler`，参考N4。
 * N4：在每个epoch开始前打乱数据顺序。（注意total_step已经变为`orignal_length // args.world_size`。）
 * N5：利用`torch.cuda.amp.autocast`控制前向过程中是否使用半精度计算。
-* N6: 利用scale控制后向过程中是否使用半精度计算。
+* N6: 当使用混合精度时，scaler会缩放loss来避免由于精度变化导致梯度为0的情况。
 * N7：为了避免log信息的重复打印，可以只允许rank0号进程打印。
 * N8: 清理进程；然后，同上。
 
@@ -357,15 +357,15 @@ def train(gpu, args):
 ```bash
 # Node 0 : ip 192.168.1.201  port : 12345
 # terminal-0
-python mnist-tcp.py --init_method tcp://192.168.1.201:12345 -g 0 --rank 0 --word_size 4 --use_mix_precision
+python mnist-tcp.py --init_method tcp://192.168.1.201:12345 -g 0 --rank 0 --world_size 4 --use_mix_precision
 # terminal-1
-python mnist-tcp.py --init_method tcp://192.168.1.201:12345 -g 1 --rank 1 --word_size 4 --use_mix_precision
+python mnist-tcp.py --init_method tcp://192.168.1.201:12345 -g 1 --rank 1 --world_size 4 --use_mix_precision
 
 # Node 1 : 
 # terminal-0
-python tcp_init.py --init_method tcp://192.168.1.201:12345 -g 0 --rank 2 --word_size 4 --use_mix_precision
+python tcp_init.py --init_method tcp://192.168.1.201:12345 -g 0 --rank 2 --world_size 4 --use_mix_precision
 # terminal-1
-python tcp_init.py --init_method tcp://192.168.1.201:12345 -g 1 --rank 3 --word_size 4 --use_mix_precision
+python tcp_init.py --init_method tcp://192.168.1.201:12345 -g 1 --rank 3 --world_size 4 --use_mix_precision
 ```
 TCP模式启动很好理解，需要在bash中独立的启动每一个进程，并为每个进程分配好其rank序号。缺点是当进程数多的时候启动比较麻烦。完整的脚本文件见[这里](https://github.com/KaiiZhang/DDP-Tutorial)。
 ***
@@ -381,13 +381,13 @@ def main():
     parser.add_argument('-e', '--epochs', default=1, type=int, 
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int, 
+    parser.add_argument('-b', '--batch_size', default=4, type=int, 
                         metavar='N',
                         help='number of batchsize')   
     ##################################################################################
     parser.add_argument("--local_rank", type=int,                                    #
                         help='rank in current node')                                 #
-    parser.add_argument('--use_mix_precision', default=False, type=bool,             #
+    parser.add_argument('--use_mix_precision', default=False,                        #
                         action='store_true', help="whether to use mix precision")    #
     ##################################################################################                  
     args = parser.parse_args()
@@ -475,7 +475,7 @@ def train(gpu, args):
                                                download=True)                       #
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)    #
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,                 #
-                                               batch_size=batch_size,               #
+                                               batch_size=args.batch_size,               #
                                                shuffle=False,                       #
                                                num_workers=0,                       #
                                                pin_memory=True,                     #

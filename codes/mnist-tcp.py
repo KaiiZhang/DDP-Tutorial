@@ -2,7 +2,7 @@
 Author: Kai Zhang
 Date: 2022-03-19 16:05:57
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-23 19:23:55
+LastEditTime: 2022-03-23 21:15:53
 Description: Start DDP in tcp model
 '''
 from datetime import datetime
@@ -23,7 +23,7 @@ def main():
     parser.add_argument('-e', '--epochs', default=1, type=int,
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int,
+    parser.add_argument('-b', '--batch_size', default=4, type=int,
                         metavar='N',
                         help='number of batchsize')
     ##################################################################################
@@ -33,7 +33,7 @@ def main():
                     help='rank of current process')                                  #
     parser.add_argument('--world_size', default=2, type=int,                         #
                         help="world size")                                           #
-    parser.add_argument('--use_mix_precision', default=False, type=bool,             #
+    parser.add_argument('--use_mix_precision', default=False,                        #
                         action='store_true', help="whether to use mix precision")    #
     ##################################################################################
     args = parser.parse_args()
@@ -84,16 +84,15 @@ def train(gpu, args):
     ######################################################################################################################
     model = ConvNet()
     model.cuda(gpu)
-    batch_size = 10
-    # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().to(gpu)
-    optimizer = torch.optim.SGD(model.parameters(), 1e-4)
     # Wrap the model
     #######################################    N2    ########################
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)                  #
     model = nn.parallel.DistributedDataParallel(model, device_ids=[gpu])    #
-    scaler = GradScaler(enabled=args.use_mix_precision)                   #
+    scaler = GradScaler(enabled=args.use_mix_precision)                     #
     #########################################################################
+    # define loss function (criterion) and optimizer
+    criterion = nn.CrossEntropyLoss().to(gpu)
+    optimizer = torch.optim.SGD(model.parameters(), 1e-4)
     # Data loading code
     train_dataset = torchvision.datasets.MNIST(root='./data',
                                                train=True,
@@ -102,7 +101,7 @@ def train(gpu, args):
     ####################################    N3    #######################################
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)      #
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,                   #
-                                               batch_size=batch_size,                   #
+                                               batch_size=args.batch_size,              #
                                                shuffle=False,                           #
                                                num_workers=0,                           #
                                                pin_memory=True,                         #
@@ -116,7 +115,7 @@ def train(gpu, args):
                                                download=True)                       #
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)    #
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,                 #
-                                               batch_size=batch_size,               #
+                                               batch_size=args.batch_size,          #
                                                shuffle=False,                       #
                                                num_workers=0,                       #
                                                pin_memory=True,                     #
@@ -142,8 +141,9 @@ def train(gpu, args):
             optimizer.zero_grad()
             ##############    N6    ##########
             scaler.scale(loss).backward()    #
+            scaler.step(optimizer)           #
+            scaler.update()                  #
             ##################################
-            optimizer.step()
             ################    N7    ####################
             if (i + 1) % 100 == 0 and args.rank == 0:    #
             ##############################################

@@ -2,7 +2,7 @@
 Author: Kai Zhang
 Date: 2022-03-19 15:12:04
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-23 19:24:13
+LastEditTime: 2022-03-23 19:49:38
 Description: demo of mnist classification 
 '''
 from datetime import datetime
@@ -81,7 +81,7 @@ def main():
     parser.add_argument('-e', '--epochs', default=1, type=int,
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int,
+    parser.add_argument('-b', '--batch_size', default=4, type=int,
                         metavar='N',
                         help='number of batchsize')
 

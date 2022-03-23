@@ -2,7 +2,7 @@
 Author: Kai Zhang
 Date: 2022-03-19 16:05:57
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-23 19:23:42
+LastEditTime: 2022-03-23 21:15:35
 Description: Start DDP in env model
 '''
 from datetime import datetime
@@ -23,13 +23,13 @@ def main():
     parser.add_argument('-e', '--epochs', default=1, type=int,
                         metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('-b', '--batchsize', default=4, type=int,
+    parser.add_argument('-b', '--batch_size', default=4, type=int,
                         metavar='N',
                         help='number of batchsize')
     ##################################################################################
     parser.add_argument("--local_rank", type=int,                                    #
                         help='rank in current node')                                 #
-    parser.add_argument('--use_mix_precision', default=False, type=bool,             #
+    parser.add_argument('--use_mix_precision', default=False,                        #
                         action='store_true', help="whether to use mix precision")    #
     ##################################################################################
     args = parser.parse_args()
@@ -77,11 +77,10 @@ def evaluate(model, gpu, test_loader, rank):
 def train(gpu, args):
     ########################################    N1    ################
     dist.init_process_group(backend='nccl', init_method='env://')    #
-    args.rank = dist.get_rank()
+    args.rank = dist.get_rank()                                      #
     ##################################################################
     model = ConvNet()
     model.cuda(gpu)
-    batch_size = 10
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().to(gpu)
     optimizer = torch.optim.SGD(model.parameters(), 1e-4)
@@ -89,7 +88,7 @@ def train(gpu, args):
     #######################################    N2    ########################
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)                  #
     model = nn.parallel.DistributedDataParallel(model, device_ids=[gpu])    #
-    scaler = GradScaler(enabled=args.use_mix_precision)                   #
+    scaler = GradScaler(enabled=args.use_mix_precision)                     #
     #########################################################################
     # Data loading code
     train_dataset = torchvision.datasets.MNIST(root='./data',
@@ -99,7 +98,7 @@ def train(gpu, args):
     ####################################    N3    #######################################
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)      #
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,                   #
-                                               batch_size=batch_size,                   #
+                                               batch_size=args.batch_size,              #
                                                shuffle=False,                           #
                                                num_workers=0,                           #
                                                pin_memory=True,                         #
@@ -113,7 +112,7 @@ def train(gpu, args):
                                                download=True)                       #
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)    #
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,                 #
-                                               batch_size=batch_size,               #
+                                               batch_size=args.batch_size,          #
                                                shuffle=False,                       #
                                                num_workers=0,                       #
                                                pin_memory=True,                     #
@@ -126,7 +125,7 @@ def train(gpu, args):
         train_loader.sampler.set_epoch(epoch)    #
         ##########################################
         model.train()
-        for i, (images, labels) in enumerate(tqdm(train_loader)):
+        for i, (images, labels) in enumerate(tqdm(train_loader) if args.rank==0 else train_loader ): # only use tqdm in rank0
             images = images.to(gpu)
             labels = labels.to(gpu)
             # Forward pass
@@ -139,8 +138,9 @@ def train(gpu, args):
             optimizer.zero_grad()
             ##############    N6    ##########
             scaler.scale(loss).backward()    #
+            scaler.step(optimizer)           #
+            scaler.update()                  #
             ##################################
-            optimizer.step()
             ################    N7    ####################
             if (i + 1) % 100 == 0 and args.rank == 0:    #
             ##############################################

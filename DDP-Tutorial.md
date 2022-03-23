@@ -2,7 +2,7 @@
  * @Author: Kai Zhang
  * @Date: 2022-03-20 15:01:01
  * @LastEditors: Kai Zhang
- * @LastEditTime: 2022-03-23 21:14:38
+ * @LastEditTime: 2022-03-23 21:21:54
  * @Description: Tutorial for DDP
 -->
 # 上手Distributed Data Parallel的详尽教程
@@ -460,8 +460,8 @@ def evaluate(model, gpu, test_loader, rank):
             outputs = model(images)
             size += images.shape[0]
             correct += (outputs.argmax(1) == labels).type(torch.float).sum() 
-    dist.reduce(size, 0, op=dist.ReduceOp.SUM) # 群体通信 reduce 操作
-    dist.reduce(correct, 0, op=dist.ReduceOp.SUM) # 群体通信 reduce 操作
+    dist.reduce(size, 0, op=dist.ReduceOp.SUM) # 群体通信 reduce 操作 change to allreduce if Gloo
+    dist.reduce(correct, 0, op=dist.ReduceOp.SUM) # 群体通信 reduce 操作 change to allreduce if Gloo
     if rank==0:
         print('Evaluate accuracy is {:.2f}'.format(correct / size))
  #################################################################################

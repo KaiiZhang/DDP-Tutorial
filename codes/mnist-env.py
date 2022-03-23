@@ -2,12 +2,11 @@
 Author: Kai Zhang
 Date: 2022-03-19 16:05:57
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-23 21:15:35
+LastEditTime: 2022-03-23 21:25:20
 Description: Start DDP in env model
 '''
 from datetime import datetime
 import argparse
-# import torch.multiprocessing as mp
 import torchvision
 import torchvision.transforms as transforms
 import torch
@@ -15,6 +14,7 @@ import torch.nn as nn
 import torch.distributed as dist
 from tqdm import tqdm
 from torch.cuda.amp import GradScaler
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -34,6 +34,7 @@ def main():
     ##################################################################################
     args = parser.parse_args()
     train(args.local_rank, args)
+
 
 class ConvNet(nn.Module):
     def __init__(self, num_classes=10):
@@ -57,6 +58,8 @@ class ConvNet(nn.Module):
         out = self.fc(out)
         return out
 
+
+####################################    N11    ##################################
 def evaluate(model, gpu, test_loader, rank):
     model.eval()
     size = torch.tensor(0.).to(gpu)
@@ -69,10 +72,14 @@ def evaluate(model, gpu, test_loader, rank):
             outputs = model(images)
             size += images.shape[0]
             correct += (outputs.argmax(1) == labels).type(torch.float).sum()
+    # 群体通信 reduce 操作 change to allreduce if Gloo
     dist.reduce(size, 0, op=dist.ReduceOp.SUM)
+    # 群体通信 reduce 操作 change to allreduce if Gloo
     dist.reduce(correct, 0, op=dist.ReduceOp.SUM)
-    if rank==0:
+    if rank == 0:
         print('Evaluate accuracy is {:.2f}'.format(correct / size))
+ #################################################################################
+
 
 def train(gpu, args):
     ########################################    N1    ################
@@ -107,25 +114,26 @@ def train(gpu, args):
 
     ####################################    N9    ###################################
     test_dataset = torchvision.datasets.MNIST(root='./data',                        #
-                                               train=False,                         #
-                                               transform=transforms.ToTensor(),     #
-                                               download=True)                       #
+                                              train=False,                          #
+                                              transform=transforms.ToTensor(),      #
+                                              download=True)                        #
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)    #
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,                 #
-                                               batch_size=args.batch_size,          #
-                                               shuffle=False,                       #
-                                               num_workers=0,                       #
-                                               pin_memory=True,                     #
-                                               sampler=test_sampler)                #
+                                              batch_size=args.batch_size,           #
+                                              shuffle=False,                        #
+                                              num_workers=0,                        #
+                                              pin_memory=True,                      #
+                                              sampler=test_sampler)                 #
     #################################################################################
     start = datetime.now()
-    total_step = len(train_loader) # The number changes to orignal_length // args.world_size
+    # The number changes to orignal_length // args.world_size
+    total_step = len(train_loader)
     for epoch in range(args.epochs):
         ################    N4    ################
         train_loader.sampler.set_epoch(epoch)    #
         ##########################################
         model.train()
-        for i, (images, labels) in enumerate(tqdm(train_loader) if args.rank==0 else train_loader ): # only use tqdm in rank0
+        for i, (images, labels) in enumerate(tqdm(train_loader) if args.rank == 0 else train_loader):  # only use tqdm in rank0
             images = images.to(gpu)
             labels = labels.to(gpu)
             # Forward pass
@@ -143,14 +151,14 @@ def train(gpu, args):
             ##################################
             ################    N7    ####################
             if (i + 1) % 100 == 0 and args.rank == 0:    #
-            ##############################################
+                ##############################################
                 print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch + 1, args.epochs, i + 1, total_step,
-                                                                   loss.item()))
+                                                                         loss.item()))
         evaluate(model, gpu, test_loader, args.rank)
     ###########    N8    ############
     dist.destroy_process_group()    #
     if args.rank == 0:              #
-    #################################
+        #################################
         print("Training complete in: " + str(datetime.now() - start))
 
 

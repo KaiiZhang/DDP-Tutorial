@@ -2,12 +2,11 @@
 Author: Kai Zhang
 Date: 2022-03-19 16:05:57
 LastEditors: Kai Zhang
-LastEditTime: 2022-03-23 21:15:53
+LastEditTime: 2022-03-23 21:24:58
 Description: Start DDP in tcp model
 '''
 from datetime import datetime
 import argparse
-# import torch.multiprocessing as mp
 import torchvision
 import torchvision.transforms as transforms
 import torch
@@ -61,6 +60,8 @@ class ConvNet(nn.Module):
         out = self.fc(out)
         return out
 
+
+####################################    N11    ##################################
 def evaluate(model, gpu, test_loader, rank):
     model.eval()
     size = torch.tensor(0.).to(gpu)
@@ -73,10 +74,13 @@ def evaluate(model, gpu, test_loader, rank):
             outputs = model(images)
             size += images.shape[0]
             correct += (outputs.argmax(1) == labels).type(torch.float).sum()
+    # 群体通信 reduce 操作 change to allreduce if Gloo
     dist.reduce(size, 0, op=dist.ReduceOp.SUM)
+    # 群体通信 reduce 操作 change to allreduce if Gloo
     dist.reduce(correct, 0, op=dist.ReduceOp.SUM)
-    if rank==0:
+    if rank == 0:
         print('Evaluate accuracy is {:.2f}'.format(correct / size))
+ #################################################################################
 
 def train(gpu, args):
     ########################################    N1    ####################################################################
